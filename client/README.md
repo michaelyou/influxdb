@@ -12,6 +12,33 @@ A Go client library written and maintained by the **InfluxDB** team.
 This package provides convenience functions to read and write time series data.
 It uses the HTTP protocol to communicate with your **InfluxDB** cluster.
 
+## Versioned Library
+
+There is now a separate and versioned copy of the Go libraries in their own
+repository. The same API is available for version 1 of the API by using the
+import path `gopkg.in/influxdata/influxdb-client.v1` and version 2 by using
+`gopkg.in/influxdata/influxdb-client.v2`. Both of these paths use the package
+name `influxdb` instead of `client`. They are also versioned so the versions
+can be used with dep. They are at separate URLs so both versions can be used
+within a large project with one dependency using one major version and another
+using a different major version. Any changes made here will be available in
+that location and vice-versa. You could use those locations as a drop-in
+replacement like this:
+
+For version 2:
+
+```go
+import client "gopkg.in/influxdata/influxdb-client.v2"
+```
+
+For version 1:
+
+```go
+import client "gopkg.in/influxdata/influxdb-client.v1"
+```
+
+For use as a dependency, this is a much more lightweight repository and
+provides optional semantic versioning for those who need it.
 
 ## Getting Started
 
