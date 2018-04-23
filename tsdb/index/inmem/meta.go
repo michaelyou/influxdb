@@ -210,15 +210,6 @@ func (m *measurement) hasSeries() bool {
 	return len(m.seriesByID) > 0
 }
 
-// cardinality returns the number of values associated with the given tag key.
-func (m *measurement) cardinality(key string) int {
-	var n int
-	m.mu.RLock()
-	n = m.seriesByTagKeyValue[key].cardinality()
-	m.mu.RUnlock()
-	return n
-}
-
 // cardinalityBytes returns the number of values associated with the given tag key.
 func (m *measurement) cardinalityBytes(key []byte) int {
 	m.mu.RLock()
@@ -332,25 +323,6 @@ func (m *measurement) filters(condition influxql.Expr) ([]uint64, map[uint64]inf
 		return m.seriesIDs(), nil, nil
 	}
 	return m.walkWhereForSeriesIds(condition)
-}
-
-// forEachSeriesByExpr iterates over all series filtered by condition.
-func (m *measurement) forEachSeriesByExpr(condition influxql.Expr, fn func(tags models.Tags) error) error {
-	// Retrieve matching series ids.
-	ids, _, err := m.filters(condition)
-	if err != nil {
-		return err
-	}
-
-	// Iterate over each series.
-	for _, id := range ids {
-		s := m.getSeriesByID(id)
-		if err := fn(s.tags); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // tagSets returns the unique tag sets that exist for the given tag keys. This is used to determine
@@ -986,63 +958,6 @@ func (a measurements) Less(i, j int) bool { return a[i].name < a[j].name }
 // Swap implements sort.Interface.
 func (a measurements) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
-func (a measurements) intersect(other measurements) measurements {
-	l := a
-	r := other
-
-	// we want to iterate through the shortest one and stop
-	if len(other) < len(a) {
-		l = other
-		r = a
-	}
-
-	// they're in sorted order so advance the counter as needed.
-	// That is, don't run comparisons against lower values that we've already passed
-	var i, j int
-
-	result := make(measurements, 0, len(l))
-	for i < len(l) && j < len(r) {
-		if l[i].name == r[j].name {
-			result = append(result, l[i])
-			i++
-			j++
-		} else if l[i].name < r[j].name {
-			i++
-		} else {
-			j++
-		}
-	}
-
-	return result
-}
-
-func (a measurements) union(other measurements) measurements {
-	result := make(measurements, 0, len(a)+len(other))
-	var i, j int
-	for i < len(a) && j < len(other) {
-		if a[i].name == other[j].name {
-			result = append(result, a[i])
-			i++
-			j++
-		} else if a[i].name < other[j].name {
-			result = append(result, a[i])
-			i++
-		} else {
-			result = append(result, other[j])
-			j++
-		}
-	}
-
-	// now append the remainder
-	if i < len(a) {
-		result = append(result, a[i:]...)
-	} else if j < len(other) {
-		result = append(result, other[j:]...)
-	}
-
-	return result
-}
-
 // series belong to a Measurement and represent unique time series in a database.
 type series struct {
 	mu      sync.RWMutex
@@ -1117,18 +1032,6 @@ func (t *tagKeyValue) contains(value string) bool {
 	return ok
 }
 
-// insertSeriesID adds a series id to the tag key value.
-func (t *tagKeyValue) insertSeriesID(value string, id uint64) {
-	t.mu.Lock()
-	entry := t.entries[value]
-	if entry == nil {
-		entry = newTagKeyValueEntry()
-		t.entries[value] = entry
-	}
-	entry.m[id] = struct{}{}
-	t.mu.Unlock()
-}
-
 // insertSeriesIDByte adds a series id to the tag key value.
 func (t *tagKeyValue) insertSeriesIDByte(value []byte, id uint64) {
 	t.mu.Lock()
@@ -1149,20 +1052,6 @@ func (t *tagKeyValue) load(value string) seriesIDs {
 
 	t.mu.RLock()
 	entry := t.entries[value]
-	ids := entry.ids()
-	t.mu.RUnlock()
-	return ids
-}
-
-// loadByte returns the SeriesIDs for the provided tag value. It makes use of
-// Go's compiler optimisation for avoiding a copy when accessing maps with a []byte.
-func (t *tagKeyValue) loadByte(value []byte) seriesIDs {
-	if t == nil {
-		return nil
-	}
-
-	t.mu.RLock()
-	entry := t.entries[string(value)]
 	ids := entry.ids()
 	t.mu.RUnlock()
 	return ids
@@ -1428,17 +1317,6 @@ type tagFilter struct {
 	regex *regexp.Regexp
 }
 
-// walkTagKeys calls fn for each tag key associated with m.  The order of the
-// keys is undefined.
-func (m *measurement) walkTagKeys(fn func(k string)) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for k := range m.seriesByTagKeyValue {
-		fn(k)
-	}
-}
-
 // tagKeys returns a list of the measurement's tag names, in sorted order.
 func (m *measurement) tagKeys() []string {
 	m.mu.RLock()
@@ -1489,18 +1367,6 @@ func (m *measurement) setFieldName(name string) {
 	m.mu.Lock()
 	m.fieldNames[name] = struct{}{}
 	m.mu.Unlock()
-}
-
-// getFieldNames returns a list of the measurement's field names, in an arbitrary order.
-func (m *measurement) getFieldNames() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	a := make([]string, 0, len(m.fieldNames))
-	for n := range m.fieldNames {
-		a = append(a, n)
-	}
-	return a
 }
 
 // seriesByTagKeyValue returns the TagKeyValue for the provided tag key.
