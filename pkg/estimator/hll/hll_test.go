@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/davecgh/go-spew/spew"
 )
@@ -23,6 +24,74 @@ func toByte(v uint64) []byte {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], v)
 	return buf[:]
+}
+
+func TestHLLPP_Bytes(t *testing.T) {
+	//// Begin p = 4
+	var p uint8 = 4
+	h := NewTestPlus(p)
+
+	plusStructOverhead := int(unsafe.Sizeof(*h))
+	compressedListOverhead := int(unsafe.Sizeof(*h.sparseList))
+
+	// denseList is empty, so the remaining footprint is sparseList
+	expectedDenseListCapacity := 0
+	if expectedDenseListCapacity != cap(h.denseList) {
+		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
+	}
+
+	// sparseList has capacity for 2^p elements, one byte each
+	expectedSparseListCapacity := int(math.Pow(2, float64(p)))
+	if expectedSparseListCapacity != cap(h.sparseList.b) {
+		t.Errorf("sparseList capacity: want %d got %d", expectedSparseListCapacity, cap(h.sparseList.b))
+	}
+
+	expectedSize := plusStructOverhead + compressedListOverhead + cap(h.sparseList.b)
+	if expectedSize != h.Bytes() {
+		t.Errorf("Bytes(): want %d got %d", expectedSize, h.Bytes())
+	}
+
+	//// Begin p = 5
+	p = 5
+	h = NewTestPlus(p)
+
+	// denseList is empty, so the remaining footprint is sparseList
+	expectedDenseListCapacity = 0
+	if expectedDenseListCapacity != cap(h.denseList) {
+		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
+	}
+
+	// sparseList has capacity for 2^p elements, one byte each
+	expectedSparseListCapacity = int(math.Pow(2, float64(p)))
+	if expectedSparseListCapacity != cap(h.sparseList.b) {
+		t.Errorf("sparseList capacity: want %d got %d", expectedSparseListCapacity, cap(h.sparseList.b))
+	}
+
+	expectedSize = plusStructOverhead + compressedListOverhead + cap(h.sparseList.b)
+	if expectedSize != h.Bytes() {
+		t.Errorf("Bytes: want %d got %d", expectedSize, h.Bytes())
+	}
+
+	//// Begin p = 4, dense this time
+	p = 4
+	h = NewTestPlus(p)
+	h.toNormal()
+
+	// denseList has capacity for 2^p elements, one byte each
+	expectedDenseListCapacity = int(math.Pow(2, float64(p)))
+	if expectedDenseListCapacity != cap(h.denseList) {
+		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
+	}
+
+	// sparseList has zero capacity, and should be nil
+	if nil != h.sparseList {
+		t.Errorf("sparseList should be nil")
+	}
+
+	expectedSize = plusStructOverhead + expectedDenseListCapacity
+	if expectedSize != h.Bytes() {
+		t.Errorf("Bytes: want %d got %d", expectedSize, h.Bytes())
+	}
 }
 
 func TestHLLPP_Add_NoSparse(t *testing.T) {
