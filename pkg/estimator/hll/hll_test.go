@@ -27,70 +27,46 @@ func toByte(v uint64) []byte {
 }
 
 func TestHLLPP_Bytes(t *testing.T) {
-	//// Begin p = 4
-	var p uint8 = 4
-	h := NewTestPlus(p)
-
-	plusStructOverhead := int(unsafe.Sizeof(*h))
-	compressedListOverhead := int(unsafe.Sizeof(*h.sparseList))
-
-	// denseList is empty, so the remaining footprint is sparseList
-	expectedDenseListCapacity := 0
-	if expectedDenseListCapacity != cap(h.denseList) {
-		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
+	testCases := []struct {
+		p      uint8
+		normal bool
+	}{
+		{4, false},
+		{5, false},
+		{4, true},
+		{5, true},
 	}
 
-	// sparseList has capacity for 2^p elements, one byte each
-	expectedSparseListCapacity := int(math.Pow(2, float64(p)))
-	if expectedSparseListCapacity != cap(h.sparseList.b) {
-		t.Errorf("sparseList capacity: want %d got %d", expectedSparseListCapacity, cap(h.sparseList.b))
-	}
+	for i, testCase := range testCases {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			h := NewTestPlus(testCase.p)
 
-	expectedSize := plusStructOverhead + compressedListOverhead + cap(h.sparseList.b)
-	if expectedSize != h.Bytes() {
-		t.Errorf("Bytes(): want %d got %d", expectedSize, h.Bytes())
-	}
+			plusStructOverhead := int(unsafe.Sizeof(*h))
+			compressedListOverhead := int(unsafe.Sizeof(*h.sparseList))
 
-	//// Begin p = 5
-	p = 5
-	h = NewTestPlus(p)
+			var expectedDenseListCapacity, expectedSparseListCapacity int
 
-	// denseList is empty, so the remaining footprint is sparseList
-	expectedDenseListCapacity = 0
-	if expectedDenseListCapacity != cap(h.denseList) {
-		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
-	}
+			if testCase.normal {
+				h.toNormal()
+				// denseList has capacity for 2^p elements, one byte each
+				expectedDenseListCapacity = int(math.Pow(2, float64(testCase.p)))
+				if expectedDenseListCapacity != cap(h.denseList) {
+					t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
+				}
+			} else {
+				// sparseList has capacity for 2^p elements, one byte each
+				expectedSparseListCapacity = int(math.Pow(2, float64(testCase.p)))
+				if expectedSparseListCapacity != cap(h.sparseList.b) {
+					t.Errorf("sparseList capacity: want %d got %d", expectedSparseListCapacity, cap(h.sparseList.b))
+				}
+				expectedSparseListCapacity += compressedListOverhead
+			}
 
-	// sparseList has capacity for 2^p elements, one byte each
-	expectedSparseListCapacity = int(math.Pow(2, float64(p)))
-	if expectedSparseListCapacity != cap(h.sparseList.b) {
-		t.Errorf("sparseList capacity: want %d got %d", expectedSparseListCapacity, cap(h.sparseList.b))
-	}
-
-	expectedSize = plusStructOverhead + compressedListOverhead + cap(h.sparseList.b)
-	if expectedSize != h.Bytes() {
-		t.Errorf("Bytes: want %d got %d", expectedSize, h.Bytes())
-	}
-
-	//// Begin p = 4, dense this time
-	p = 4
-	h = NewTestPlus(p)
-	h.toNormal()
-
-	// denseList has capacity for 2^p elements, one byte each
-	expectedDenseListCapacity = int(math.Pow(2, float64(p)))
-	if expectedDenseListCapacity != cap(h.denseList) {
-		t.Errorf("denseList capacity: want %d got %d", expectedDenseListCapacity, cap(h.denseList))
-	}
-
-	// sparseList has zero capacity, and should be nil
-	if nil != h.sparseList {
-		t.Errorf("sparseList should be nil")
-	}
-
-	expectedSize = plusStructOverhead + expectedDenseListCapacity
-	if expectedSize != h.Bytes() {
-		t.Errorf("Bytes: want %d got %d", expectedSize, h.Bytes())
+			expectedSize := plusStructOverhead + expectedDenseListCapacity + expectedSparseListCapacity
+			if expectedSize != h.Bytes() {
+				t.Errorf("Bytes(): want %d got %d", expectedSize, h.Bytes())
+			}
+		})
 	}
 }
 
