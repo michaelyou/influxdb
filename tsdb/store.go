@@ -48,11 +48,11 @@ const SeriesFileDirectory = "_series"
 // Store manages shards and indexes for databases.
 type Store struct {
 	mu                sync.RWMutex
-	shards            map[uint64]*Shard
+	shards            map[uint64]*Shard // 所有shards的索引，key为shardID
 	databases         map[string]struct{}
-	sfiles            map[string]*SeriesFile
-	SeriesFileMaxSize int64 // Determines size of series file mmap. Can be altered in tests.
-	path              string
+	sfiles            map[string]*SeriesFile //key为数据库名
+	SeriesFileMaxSize int64                  // Determines size of series file mmap. Can be altered in tests.
+	path              string                 // 数据库文件在磁盘上的存储路径
 
 	// shared per-database indexes, only if using "inmem".
 	indexes map[string]interface{}

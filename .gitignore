@@ -81,3 +81,6 @@ man/*.1.gz
 
 # vendored files
 /vendor
+
+# vim 
+*.swp

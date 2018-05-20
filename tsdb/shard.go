@@ -124,17 +124,19 @@ func (e PartialWriteError) Error() string {
 // Data can be split across many shards. The query engine in TSDB is responsible
 // for combining the output of many shards into a single query result.
 type Shard struct {
-	path    string
-	walPath string
-	id      uint64
+	path    string // shard在磁盘上的路径
+	walPath string // 对应的wal文件所在路径
+	id      uint64 // shardID，也就是磁盘上的文件名（其实是目录）
 
-	database        string
-	retentionPolicy string
+	database        string // 所在数据库名
+	retentionPolicy string // 对应的存储策略名
 
 	sfile   *SeriesFile
 	options EngineOptions
 
-	mu      sync.RWMutex
+	mu sync.RWMutex
+	// 存储引擎，每一个 Shard 对象都有一个单独的底层数据存储引擎，engine 负责和底层的文件数据打交道。
+	// Engine是一个接口，可以方便替换，目前使用的tsm1，结构体在 tsdb/engine/tsm1/engine.go
 	_engine Engine
 	index   Index
 	enabled bool

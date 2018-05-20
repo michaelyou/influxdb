@@ -157,7 +157,7 @@ type Engine struct {
 
 	WAL            *WAL
 	Cache          *Cache
-	Compactor      *Compactor
+	Compactor      *Compactor // 压缩合并管理对象
 	CompactionPlan CompactionPlanner
 	FileStore      *FileStore
 

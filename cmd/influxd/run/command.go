@@ -146,6 +146,7 @@ func (cmd *Command) Run(args ...string) error {
 	s.Logger = cmd.Logger
 	s.CPUProfile = options.CPUProfile
 	s.MemProfile = options.MemProfile
+	// 启动各项服务
 	if err := s.Open(); err != nil {
 		return fmt.Errorf("open server: %s", err)
 	}
