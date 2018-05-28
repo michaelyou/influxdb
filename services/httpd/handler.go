@@ -657,6 +657,7 @@ func (h *Handler) async(q *influxql.Query, results <-chan *query.Result) {
 }
 
 // serveWrite receives incoming series data in line protocol format and writes it to the database.
+// http写入请求
 func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.User) {
 	atomic.AddInt64(&h.stats.WriteRequests, 1)
 	atomic.AddInt64(&h.stats.ActiveWriteRequests, 1)
@@ -666,12 +667,14 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	}(time.Now())
 	h.requestTracker.Add(r, user)
 
+	// 从请求中获取数据库名
 	database := r.URL.Query().Get("db")
 	if database == "" {
 		h.httpError(w, "database is required", http.StatusBadRequest)
 		return
 	}
 
+	// 元数据总查询这个数据库的信息
 	if di := h.MetaClient.Database(database); di == nil {
 		h.httpError(w, fmt.Sprintf("database not found: %q", database), http.StatusNotFound)
 		return
@@ -695,6 +698,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	}
 
 	// Handle gzip decoding of the body
+	// 如果启用了gzip，解压缩
 	if r.Header.Get("Content-Encoding") == "gzip" {
 		b, err := gzip.NewReader(r.Body)
 		if err != nil {
@@ -737,6 +741,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 		h.Logger.Info("Write body received by handler", zap.ByteString("body", buf.Bytes()))
 	}
 
+	// 解析出所有的Points，成功的返回，如果出现在错误信息中返回
 	points, parseError := models.ParsePointsWithPrecision(buf.Bytes(), time.Now().UTC(), r.URL.Query().Get("precision"))
 	// Not points parsed correctly so return the error now
 	if parseError != nil && len(points) == 0 {
@@ -761,6 +766,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 	}
 
 	// Write points.
+	// 将Points数据写入数据库
 	if err := h.PointsWriter.WritePoints(database, r.URL.Query().Get("rp"), consistency, user, points); influxdb.IsClientError(err) {
 		atomic.AddInt64(&h.stats.PointsWrittenFail, int64(len(points)))
 		h.httpError(w, err.Error(), http.StatusBadRequest)

@@ -91,6 +91,7 @@ type CompactionPlanner interface {
 // multiple generations of TSM files into larger files in stages.  It attempts
 // to minimize the number of TSM files on disk while rolling up a bounder number
 // of files.
+// 默认的压缩合并计划
 type DefaultPlanner struct {
 	FileStore fileStore
 
@@ -98,6 +99,9 @@ type DefaultPlanner struct {
 	// which if no writes have been committed to the WAL, the engine will
 	// do a full compaction of the TSM files in this shard. This duration
 	// should always be greater than the CacheFlushWriteColdDuraion
+	//
+	// 如果一个 shard 对应的 wal 文件超过指定时间一直没有数据写入
+	// 存储引擎将会将此 shard 中的 tsm 文件进行一次全量压缩合并
 	compactFullWriteColdDuration time.Duration
 
 	// lastPlanCheck is the last time Plan was called

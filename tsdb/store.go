@@ -166,6 +166,9 @@ func (s *Store) Path() string { return s.path }
 
 // Open initializes the store, creating all necessary directories, loading all
 // shards as well as initializing periodic maintenance of them.
+// 创建或者加载已经存在的数据库
+// 主要是创建各种资源管理对象，wal, tsm file 等等
+// 还需要遍历一些文件的索引信息，将部分内容在内存中构建索引，加速之后的查询操作
 func (s *Store) Open() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -185,6 +188,9 @@ func (s *Store) Open() error {
 		return err
 	}
 
+	// 加载所有 shard 中的资源
+	// 将 wal 文件中的内容加载到 cache 中
+	// 根据 tsm file 中的索引信息，在内存中构建整个数据库的 measurement 和 tags, field 的索引信息，便于加速之后的查询操作
 	if err := s.loadShards(); err != nil {
 		return err
 	}
@@ -199,6 +205,9 @@ func (s *Store) Open() error {
 	return nil
 }
 
+// 加载所有 shard 中的资源
+// 将 wal 文件中的内容加载到 cache 中
+// 根据 tsm file 中的索引信息，在内存中构建整个数据库的 measurement 和 tags, field 的索引信息，便于加速之后的查询操作
 func (s *Store) loadShards() error {
 	// res holds the result from opening each shard in a goroutine
 	type res struct {
@@ -242,6 +251,7 @@ func (s *Store) loadShards() error {
 	defer logEnd()
 
 	t := limiter.NewFixed(runtime.GOMAXPROCS(0))
+	// 这个channel用于异步获取所有协程的返回内容
 	resC := make(chan *res)
 	var n int
 
@@ -264,6 +274,7 @@ func (s *Store) loadShards() error {
 		}
 
 		// Load series file.
+		// 加载series file，不存在则创建。文件目录在data dir下的`_series`文件夹，`_series`支持了partition，目前分成了8个
 		sfile, err := s.openSeriesFile(db.Name())
 		if err != nil {
 			return err
@@ -281,6 +292,7 @@ func (s *Store) loadShards() error {
 			return err
 		}
 
+		// 遍历一个数据库中所有的存储策略
 		for _, rp := range rpDirs {
 			rpPath := filepath.Join(s.path, db.Name(), rp.Name())
 			if !rp.IsDir() {
@@ -303,6 +315,7 @@ func (s *Store) loadShards() error {
 				return err
 			}
 
+			// 遍历一个存储策略下所有的shard
 			for _, sh := range shardDirs {
 				n++
 				go func(db, rp, sh string) {
@@ -310,6 +323,7 @@ func (s *Store) loadShards() error {
 					defer t.Release()
 
 					start := time.Now()
+					// shard的路径
 					path := filepath.Join(s.path, db, rp, sh)
 					walPath := filepath.Join(s.EngineOptions.Config.WALDir, db, rp, sh)
 
@@ -335,6 +349,7 @@ func (s *Store) loadShards() error {
 					opt.SeriesIDSets = shardSet{store: s, db: db}
 
 					// Existing shards should continue to use inmem index.
+					// index目录存放的是tsl和tsi文件，如果不存在，说明启用的index-version还是inmem
 					if _, err := os.Stat(filepath.Join(path, "index")); os.IsNotExist(err) {
 						opt.IndexVersion = "inmem"
 					}
@@ -346,6 +361,7 @@ func (s *Store) loadShards() error {
 					shard.EnableOnOpen = false
 					shard.WithLogger(s.baseLogger)
 
+					// 创建 shard 的底层存储引擎对象，初始化 wal, tsm file, cache 等管理对象的服务，从 tsm file 中获取信息建立 measurement 以及 tags, filed 相关的在内存中的索引信息
 					err = shard.Open()
 					if err != nil {
 						log.Info("Failed to open shard", logger.Shard(shardID), zap.Error(err))
@@ -1252,6 +1268,7 @@ func (s *Store) WriteToShard(shardID uint64, points []models.Point) error {
 	default:
 	}
 
+	// 获取shard信息
 	sh := s.shards[shardID]
 	if sh == nil {
 		s.mu.RUnlock()
@@ -1265,6 +1282,7 @@ func (s *Store) WriteToShard(shardID uint64, points []models.Point) error {
 		sh.SetCompactionsEnabled(true)
 	}
 
+	// 向shard中写入数据
 	return sh.WritePoints(points)
 }
 

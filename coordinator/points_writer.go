@@ -288,6 +288,7 @@ func (w *PointsWriter) WritePoints(database, retentionPolicy string, consistency
 }
 
 // WritePointsPrivileged writes the data to the underlying storage, consitencyLevel is only used for clustered scenarios
+// 将points数据写入数据库，由于目前没有集群，一致性这个参数可以忽略
 func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, consistencyLevel models.ConsistencyLevel, points []models.Point) error {
 	atomic.AddInt64(&w.stats.WriteReq, 1)
 	atomic.AddInt64(&w.stats.PointWriteReq, int64(len(points)))
@@ -300,12 +301,14 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 		retentionPolicy = db.DefaultRetentionPolicy
 	}
 
+	// 将要写入的Points按照时间划分到要写入的shard，返回一个
 	shardMappings, err := w.MapShards(&WritePointsRequest{Database: database, RetentionPolicy: retentionPolicy, Points: points})
 	if err != nil {
 		return err
 	}
 
 	// Write each shard in it's own goroutine and return as soon as one fails.
+	// 每一个shard都有一个独立的协程负责写入，只要一个出错，就立即返回错误信息
 	ch := make(chan error, len(shardMappings.Points))
 	for shardID, points := range shardMappings.Points {
 		go func(shard *meta.ShardInfo, database, retentionPolicy string, points []models.Point) {
@@ -317,6 +320,7 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 		}(shardMappings.Shards[shardID], database, retentionPolicy, points)
 	}
 
+	// 如果需要，转发一份给其他订阅者
 	// Send points to subscriptions if possible.
 	var ok, dropped int64
 	pts := &WritePointsRequest{Database: database, RetentionPolicy: retentionPolicy, Points: points}
@@ -354,6 +358,7 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 			atomic.AddInt64(&w.stats.WriteTimeout, 1)
 			// return timeout error to caller
 			return ErrTimeout
+		// 只要有一个出错，就返回出错信息
 		case err := <-ch:
 			if err != nil {
 				return err
@@ -367,6 +372,7 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPolicy string, points []models.Point) error {
 	atomic.AddInt64(&w.stats.PointWriteReqLocal, int64(len(points)))
 
+	// 将数据写入shard中，包括cache以及wal文件中
 	err := w.TSDBStore.WriteToShard(shard.ID, points)
 	if err == nil {
 		atomic.AddInt64(&w.stats.WriteOK, 1)
@@ -381,6 +387,7 @@ func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPo
 
 	// If we've written to shard that should exist on the current node, but the store has
 	// not actually created this shard, tell it to create it and retry the write
+	// 如果底层存储引擎返回 shard 未创建，创建之后再次尝试写入，因为这个次数不频繁，所以不需要每次写入的时候检查
 	if err == tsdb.ErrShardNotFound {
 		err = w.TSDBStore.CreateShard(database, retentionPolicy, shard.ID, true)
 		if err != nil {
@@ -390,6 +397,7 @@ func (w *PointsWriter) writeToShard(shard *meta.ShardInfo, database, retentionPo
 			return err
 		}
 	}
+	// 再次尝试写入
 	err = w.TSDBStore.WriteToShard(shard.ID, points)
 	if err != nil {
 		w.Logger.Info("Write failed", zap.Uint64("shard", shard.ID), zap.Error(err))

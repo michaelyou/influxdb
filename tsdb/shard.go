@@ -287,6 +287,7 @@ func (s *Shard) Statistics(tags map[string]string) []models.Statistic {
 func (s *Shard) Path() string { return s.path }
 
 // Open initializes and opens the shard's store.
+// 创建 shard 的底层存储引擎对象，初始化 wal, tsm file, cache 等管理对象的服务，从 tsm file 中获取信息建立 measurement 以及 tags, filed 相关的在内存中的索引信息
 func (s *Shard) Open() error {
 	if err := func() error {
 		s.mu.Lock()
@@ -492,6 +493,7 @@ func (s *Shard) WritePoints(points []models.Point) error {
 	var writeError error
 	atomic.AddInt64(&s.stats.WriteReq, 1)
 
+	// 检查要写入的 Points 中是否有新的 series 和 field，如果有，需要更新元数据信息以及索引信息，并且返回需要创建的 field 信息
 	points, fieldsToCreate, err := s.validateSeriesAndFields(points)
 	if err != nil {
 		if _, ok := err.(PartialWriteError); !ok {
@@ -504,11 +506,13 @@ func (s *Shard) WritePoints(points []models.Point) error {
 	atomic.AddInt64(&s.stats.FieldsCreated, int64(len(fieldsToCreate)))
 
 	// add any new fields and keep track of what needs to be saved
+	// 在内存索引中加入fields信息
 	if err := s.createFieldsAndMeasurements(fieldsToCreate); err != nil {
 		return err
 	}
 
 	// Write to the engine.
+	// 调用此 shard 的存储引擎的写入函数，tsm1 中先写入 memtable，之后写入 wal 文件中
 	if err := engine.WritePoints(points); err != nil {
 		atomic.AddInt64(&s.stats.WritePointsErr, int64(len(points)))
 		atomic.AddInt64(&s.stats.WriteReqErr, 1)

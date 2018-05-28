@@ -28,7 +28,11 @@ type measurement struct {
 	fieldNames map[string]struct{}
 
 	// in-memory index fields
-	seriesByID          map[uint64]*series      // lookup table for series by their id
+	// id 以及其对应的 series 信息，主要是为了在 seriesByTagKeyValue 中存储id节约内存
+	seriesByID map[uint64]*series // lookup table for series by their id
+
+	// 根据 tagk 和 tagv 的双重索引，保存排好序的 SeriesID 数组
+	// 这个 map 用于在查询操作时，可以根据 tags 来快速过滤出要查询的所有 SeriesID，之后根据 SeriesKey 以及时间范围从文件中读取相应内容
 	seriesByTagKeyValue map[string]*tagKeyValue // map from tag key to value to sorted set of series ids
 
 	// lazyily created sorted series IDs

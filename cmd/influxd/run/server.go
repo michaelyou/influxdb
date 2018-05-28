@@ -365,41 +365,50 @@ func (s *Server) Open() error {
 	s.Listener = ln
 
 	// Multiplex listener.
+	// 启动 tcp 连接复用器，所有服务的连接都通过 ln 建立，但是会根据第一个字节的不同分发到不同的处理handler中
 	mux := tcp.NewMux()
 	go mux.Serve(ln)
 
 	// Append services.
-	s.appendMonitorService()
-	s.appendPrecreatorService(s.config.Precreator)
-	s.appendSnapshotterService()
-	s.appendContinuousQueryService(s.config.ContinuousQuery)
-	s.appendHTTPDService(s.config.HTTPD)
+	s.appendMonitorService()                                 // 注册监控服务
+	s.appendPrecreatorService(s.config.Precreator)           // shard服务预创建的服务
+	s.appendSnapshotterService()                             // 注册快照服务
+	s.appendContinuousQueryService(s.config.ContinuousQuery) // CQ 服务，用于执行定期查询，之后写入另外的 metric
+	s.appendHTTPDService(s.config.HTTPD)                     // httpd 服务，用于提供 RESTFUL 的接口执行写入和查询等操作
 	s.appendStorageService(s.config.Storage)
-	s.appendRetentionPolicyService(s.config.Retention)
+	s.appendRetentionPolicyService(s.config.Retention) // RP 服务，用于指定 metric 的保存时间
+
+	// 用于监控数据的展示，需要其他组件
 	for _, i := range s.config.GraphiteInputs {
 		if err := s.appendGraphiteService(i); err != nil {
 			return err
 		}
 	}
+	// collectd 数据采集服务，需要其他组件
 	for _, i := range s.config.CollectdInputs {
 		s.appendCollectdService(i)
 	}
+	// opentsdb兼容服务
 	for _, i := range s.config.OpenTSDBInputs {
 		if err := s.appendOpenTSDBService(i); err != nil {
 			return err
 		}
 	}
+	// udp接口
 	for _, i := range s.config.UDPInputs {
 		s.appendUDPService(i)
 	}
 
+	// subscriber 用于额外复制一份写入的数据给其他程序使用
 	s.Subscriber.MetaClient = s.MetaClient
 	s.PointsWriter.MetaClient = s.MetaClient
 	s.Monitor.MetaClient = s.MetaClient
 
+	// 注册快照服务的处理接口
 	s.SnapshotterService.Listener = mux.Listen(snapshotter.MuxHeader)
 
 	// Configure logging for all services and clients.
+	// 设置日志输出配置
 	if s.config.Meta.LoggingEnabled {
 		s.MetaClient.WithLogger(s.Logger)
 	}
@@ -416,6 +425,7 @@ func (s *Server) Open() error {
 	s.Monitor.WithLogger(s.Logger)
 
 	// Open TSDB store.
+	// 启动存储引擎，创建或者加载已经存在的数据库，构建内存中的索引信息
 	if err := s.TSDBStore.Open(); err != nil {
 		return fmt.Errorf("open tsdb store: %s", err)
 	}
@@ -426,12 +436,14 @@ func (s *Server) Open() error {
 	}
 
 	// Open the points writer service
+	// 启用数据写入服务
 	if err := s.PointsWriter.Open(); err != nil {
 		return fmt.Errorf("open points writer: %s", err)
 	}
 
 	s.PointsWriter.AddWriteSubscriber(s.Subscriber.Points())
 
+	// 启用其余服务
 	for _, service := range s.Services {
 		if err := service.Open(); err != nil {
 			return fmt.Errorf("open service: %s", err)

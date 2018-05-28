@@ -1230,6 +1230,7 @@ func (e *Engine) addToIndexFromKey(keys [][]byte, fieldTypes []influxql.DataType
 
 // WritePoints writes metadata and point data into the engine.
 // It returns an error if new points are added to an existing key.
+// 向memtable以及wal文件中写入数据
 func (e *Engine) WritePoints(points []models.Point) error {
 	values := make(map[string][]Value, len(points))
 	var (
@@ -1242,6 +1243,7 @@ func (e *Engine) WritePoints(points []models.Point) error {
 		keyBuf = append(keyBuf[:0], p.Key()...)
 		keyBuf = append(keyBuf, keyFieldSeparator...)
 		baseLen = len(keyBuf)
+		// 一条插入语句中一个 series 对应的多个 value 会被拆分出来，形成多条数据
 		iter := p.FieldIterator()
 		t := p.Time().UnixNano()
 		for iter.Next() {
@@ -1250,6 +1252,7 @@ func (e *Engine) WritePoints(points []models.Point) error {
 				continue
 			}
 
+			// 这里的 key 是 seriesKey + 分隔符 + filedName
 			keyBuf = append(keyBuf[:baseLen], iter.FieldKey()...)
 
 			if e.seriesTypeMap != nil {
@@ -1321,10 +1324,12 @@ func (e *Engine) WritePoints(points []models.Point) error {
 	defer e.mu.RUnlock()
 
 	// first try to write to the cache
+	// 向 memtable 中写入 value 数据，如果超过了内存阀值上限，返回错误
 	if err := e.Cache.WriteMulti(values); err != nil {
 		return err
 	}
 
+	// 将数据写入 wal 文件中
 	if e.WALEnabled {
 		if _, err := e.WAL.WriteMulti(values); err != nil {
 			return err
@@ -1872,6 +1877,7 @@ func (e *Engine) writeSnapshotAndCommit(log *zap.Logger, closedFiles []string, s
 func (e *Engine) compactCache() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	// 每秒检查一次
 	for {
 		e.mu.RLock()
 		quit := e.snapDone

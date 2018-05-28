@@ -731,6 +731,7 @@ func (a BatchDeleters) Rollback() error {
 
 // indirectIndex is a TSMIndex that uses a raw byte slice representation of an index.  This
 // implementation can be used for indexes that may be MMAPed into memory.
+// 间接索引，只存放每一个 key 在下一层详细索引中的偏移量的信息
 type indirectIndex struct {
 	mu sync.RWMutex
 
@@ -768,10 +769,12 @@ type indirectIndex struct {
 
 	// b is the underlying index byte slice.  This could be a copy on the heap or an MMAP
 	// slice reference
+	// 下层详细索引的字节流
 	b []byte
 
 	// offsets contains the positions in b for each key.  It points to the 2 byte length of
 	// key.
+	// 偏移量数组，记录了一个 key 在 b 中的偏移量
 	offsets []byte
 
 	// minKey, maxKey are the minium and maximum (lexicographically sorted) contained in the
@@ -780,11 +783,13 @@ type indirectIndex struct {
 
 	// minTime, maxTime are the minimum and maximum times contained in the file across all
 	// series.
+	// 此文件中的最小时间和最大时间，根据这个可以快速判断要查询的数据在此文件中是否存在，是否有必要读取这个文件
 	minTime, maxTime int64
 
 	// tombstones contains only the tombstoned keys with subset of time values deleted.  An
 	// entry would exist here if a subset of the points for a key were deleted and the file
 	// had not be re-compacted to remove the points on disk.
+	// 用于记录哪些 key 在指定范围内的数据是已经被删除的
 	tombstones map[string][]TimeRange
 }
 

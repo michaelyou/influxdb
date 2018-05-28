@@ -370,6 +370,7 @@ func newFloatCursor(seek int64, ascending bool, cacheValues Values, tsmKeyCursor
 	return newFloatDescendingCursor(seek, cacheValues, tsmKeyCursor)
 }
 
+// 底层主要是 KeyCursor，每次读取一个 block 的数据
 type floatAscendingCursor struct {
 	cache struct {
 		values Values
@@ -377,7 +378,7 @@ type floatAscendingCursor struct {
 	}
 
 	tsm struct {
-		values    []FloatValue
+		values    []FloatValue // 从 tsm 文件中读取到的 FloatValue 的缓存
 		pos       int
 		keyCursor *KeyCursor
 	}

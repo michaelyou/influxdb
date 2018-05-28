@@ -178,12 +178,15 @@ type IndexWriter interface {
 // IndexEntry is the index information for a given block in a TSM file.
 type IndexEntry struct {
 	// The min and max time of all points stored in the block.
+	// 一个 block 中的 point 都在这个最小和最大的时间范围内
 	MinTime, MaxTime int64
 
 	// The absolute position in the file where this block is located.
+	// block 在 tsm 文件中偏移量
 	Offset int64
 
 	// The size in bytes of the block in the file.
+	// block 的具体大小
 	Size uint32
 }
 

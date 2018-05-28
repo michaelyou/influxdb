@@ -78,6 +78,7 @@ func (m *Main) Run(args ...string) error {
 		cmd.Commit = commit
 		cmd.Branch = branch
 
+		// 启动influxdb
 		if err := cmd.Run(args...); err != nil {
 			return fmt.Errorf("run: %s", err)
 		}
@@ -93,6 +94,8 @@ func (m *Main) Run(args ...string) error {
 
 		// Block again until another signal is received, a shutdown timeout elapses,
 		// or the Command is gracefully closed
+		//
+		// cmd.Close()进行一些清理工作，如果要立刻关闭需要再发一次signal
 		cmd.Logger.Info("Waiting for clean shutdown...")
 		select {
 		case <-signalCh:
