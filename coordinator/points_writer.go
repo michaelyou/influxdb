@@ -187,6 +187,8 @@ func (w *PointsWriter) Statistics(tags map[string]string) []models.Statistic {
 // MapShards maps the points contained in wp to a ShardMapping.  If a point
 // maps to a shard group or shard that does not currently exist, it will be
 // created before returning the mapping.
+// 返回一个point与shard的映射。如果一个point映射到了一个不存在的shard group 或 shard，
+// 会在函数返回直线创建它
 func (w *PointsWriter) MapShards(wp *WritePointsRequest) (*ShardMapping, error) {
 	rp, err := w.MetaClient.RetentionPolicy(wp.Database, wp.RetentionPolicy)
 	if err != nil {
@@ -301,7 +303,7 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 		retentionPolicy = db.DefaultRetentionPolicy
 	}
 
-	// 将要写入的Points按照时间划分到要写入的shard，返回一个
+	// 将要写入的Points按照时间划分到要写入的shard，返回一个 Point 和 shard 之间的映射关系
 	shardMappings, err := w.MapShards(&WritePointsRequest{Database: database, RetentionPolicy: retentionPolicy, Points: points})
 	if err != nil {
 		return err

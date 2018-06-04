@@ -658,6 +658,8 @@ func (h *Handler) async(q *influxql.Query, results <-chan *query.Result) {
 
 // serveWrite receives incoming series data in line protocol format and writes it to the database.
 // http写入请求
+//
+// eg. curl -i -XPOST 'http://localhost:8086/write?db=mydb' --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
 func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.User) {
 	atomic.AddInt64(&h.stats.WriteRequests, 1)
 	atomic.AddInt64(&h.stats.ActiveWriteRequests, 1)
@@ -674,7 +676,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 		return
 	}
 
-	// 元数据总查询这个数据库的信息
+	// 元数据中查询这个数据库的信息
 	if di := h.MetaClient.Database(database); di == nil {
 		h.httpError(w, fmt.Sprintf("database not found: %q", database), http.StatusNotFound)
 		return
@@ -741,7 +743,7 @@ func (h *Handler) serveWrite(w http.ResponseWriter, r *http.Request, user meta.U
 		h.Logger.Info("Write body received by handler", zap.ByteString("body", buf.Bytes()))
 	}
 
-	// 解析出所有的Points，成功的返回，如果出现在错误信息中返回
+	// 解析出所有的Points，成功的返回，如果出错在错误信息中返回
 	points, parseError := models.ParsePointsWithPrecision(buf.Bytes(), time.Now().UTC(), r.URL.Query().Get("precision"))
 	// Not points parsed correctly so return the error now
 	if parseError != nil && len(points) == 0 {

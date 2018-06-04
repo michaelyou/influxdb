@@ -325,6 +325,7 @@ func ParsePointsWithPrecision(buf []byte, defaultTime time.Time, precision strin
 		failed []string
 	)
 	for pos < len(buf) {
+		// 写入时，多个point之间用\n隔开
 		pos, block = scanLine(buf, pos)
 		pos++
 
@@ -364,8 +365,10 @@ func ParsePointsWithPrecision(buf []byte, defaultTime time.Time, precision strin
 
 }
 
+// 解析Point
 func parsePoint(buf []byte, defaultTime time.Time, precision string) (Point, error) {
 	// scan the first block which is measurement[,tag1=value1,tag2=value=2...]
+	// key就是mesurement + tags
 	pos, key, err := scanKey(buf, 0)
 	if err != nil {
 		return nil, err
@@ -1070,6 +1073,7 @@ func skipWhitespace(buf []byte, i int) int {
 
 // scanLine returns the end position in buf and the next line found within
 // buf.
+// 返回buf中的一行的最后位置(\n的位置)和这一行
 func scanLine(buf []byte, i int) (int, []byte) {
 	start := i
 	quoted := false
