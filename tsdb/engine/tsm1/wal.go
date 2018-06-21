@@ -398,8 +398,9 @@ func (l *WAL) writeToLog(entry WALEntry) (int, error) {
 	// limit how many concurrent encodings can be in flight.  Since we can only
 	// write one at a time to disk, a slow disk can cause the allocations below
 	// to increase quickly.  If we're backed up, wait until others have completed.
-	bytes := bytesPool.Get(entry.MarshalSize())
+	bytes := bytesPool.Get(entry.MarshalSize()) // 从内存池中取出一块内存
 
+	// entry序列化，如果bytes不够大会重新申请
 	b, err := entry.Encode(bytes)
 	if err != nil {
 		bytesPool.Put(bytes)
@@ -408,7 +409,9 @@ func (l *WAL) writeToLog(entry WALEntry) (int, error) {
 
 	encBuf := bytesPool.Get(snappy.MaxEncodedLen(len(b)))
 
+	// 压缩数据
 	compressed := snappy.Encode(encBuf, b)
+	// 用完放回去
 	bytesPool.Put(bytes)
 
 	syncErr := make(chan error)
@@ -425,11 +428,13 @@ func (l *WAL) writeToLog(entry WALEntry) (int, error) {
 		}
 
 		// roll the segment file if needed
+		// 查当前的 wal 分片文件是否达到阀值，如果超过了创建一个新的分片文件
 		if err := l.rollSegment(); err != nil {
 			return -1, fmt.Errorf("error rolling WAL segment: %v", err)
 		}
 
 		// write and sync
+		// 将压缩后的entry写入段文件
 		if err := l.currentSegmentWriter.Write(entry.Type(), compressed); err != nil {
 			return -1, fmt.Errorf("error writing WAL entry: %v", err)
 		}
@@ -462,6 +467,7 @@ func (l *WAL) writeToLog(entry WALEntry) (int, error) {
 
 // rollSegment checks if the current segment is due to roll over to a new segment;
 // and if so, opens a new segment file for future writes.
+// 检查当前段文件是否达到阈值，超过则创建一个新文件
 func (l *WAL) rollSegment() error {
 	if l.currentSegmentWriter == nil || l.currentSegmentWriter.size > DefaultSegmentSize {
 		if err := l.newSegmentFile(); err != nil {
@@ -556,6 +562,7 @@ func segmentFileNames(dir string) ([]string, error) {
 }
 
 // newSegmentFile will close the current segment file and open a new one, updating bookkeeping info on the log.
+// 创建一个新的段文件，关闭旧的文件，SegmentID + 1
 func (l *WAL) newSegmentFile() error {
 	l.currentSegmentID++
 	if l.currentSegmentWriter != nil {
@@ -567,6 +574,7 @@ func (l *WAL) newSegmentFile() error {
 		atomic.StoreInt64(&l.stats.OldBytes, int64(l.currentSegmentWriter.size))
 	}
 
+	// 新段文件名
 	fileName := filepath.Join(l.path, fmt.Sprintf("%s%05d.%s", WALFilePrefix, l.currentSegmentID, WALFileExtension))
 	fd, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
@@ -638,6 +646,7 @@ func (w *WriteWALEntry) MarshalSize() int {
 // Encode converts the WriteWALEntry into a byte stream using dst if it
 // is large enough.  If dst is too small, the slice will be grown to fit the
 // encoded entry.
+// 将要写入的数据序列化成 wal 文件中的格式
 func (w *WriteWALEntry) Encode(dst []byte) ([]byte, error) {
 	// The entries values are encode as follows:
 	//
@@ -657,6 +666,7 @@ func (w *WriteWALEntry) Encode(dst []byte) ([]byte, error) {
 	// │1 byte│ 2 bytes │ N bytes│4 bytes│ 8 bytes │ N bytes │   │1 byte│   │
 	// └──────┴─────────┴────────┴───────┴─────────┴─────────┴───┴──────┴───┘
 
+	// 计算需要的总长度
 	encLen := w.MarshalSize() // Type (1), Key Length (2), and Count (4) for each key
 
 	// allocate or re-slice to correct size
@@ -1058,6 +1068,8 @@ func (w *WALSegmentWriter) path() string {
 }
 
 // Write writes entryType and the buffer containing compressed entry data.
+// 将压缩后的entry数据写入段文件
+// 首先会写入entry的type和entry的长度
 func (w *WALSegmentWriter) Write(entryType WalEntryType, compressed []byte) error {
 	var buf [5]byte
 	buf[0] = byte(entryType)

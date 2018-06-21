@@ -314,6 +314,7 @@ func (w *PointsWriter) WritePointsPrivileged(database, retentionPolicy string, c
 	ch := make(chan error, len(shardMappings.Points))
 	for shardID, points := range shardMappings.Points {
 		go func(shard *meta.ShardInfo, database, retentionPolicy string, points []models.Point) {
+			// 写
 			err := w.writeToShard(shard, database, retentionPolicy, points)
 			if err == tsdb.ErrShardDeletion {
 				err = tsdb.PartialWriteError{Reason: fmt.Sprintf("shard %d is pending deletion", shard.ID), Dropped: len(points)}

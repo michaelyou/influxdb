@@ -100,6 +100,7 @@ func (e *entry) add(values []Value) error {
 
 // deduplicate sorts and orders the entry's values. If values are already deduped and sorted,
 // the function does no work and simply returns.
+// 排序 + 去重
 func (e *entry) deduplicate() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -399,7 +400,7 @@ func (c *Cache) Snapshot() (*Cache, error) {
 		return c.snapshot, nil
 	}
 
-	c.snapshot.store, c.store = c.store, c.snapshot.store
+	c.snapshot.store, c.store = c.store, c.snapshot.store // 这里比较取巧了，将cache给snapshot赋值，然后用snapshot（一个空的cache）来情况原来的cache
 	snapshotSize := c.Size()
 
 	// Save the size of the snapshot on the snapshot cache
@@ -427,6 +428,7 @@ func (c *Cache) Deduplicate() {
 
 	// Apply a function that simply calls deduplicate on each entry in the ring.
 	// apply cannot return an error in this invocation.
+	// hashring上存储的是[]Value
 	_ = store.apply(func(_ []byte, e *entry) error { e.deduplicate(); return nil })
 }
 

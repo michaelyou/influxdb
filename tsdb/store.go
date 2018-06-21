@@ -1272,6 +1272,7 @@ func (s *Store) WriteToShard(shardID uint64, points []models.Point) error {
 	sh := s.shards[shardID]
 	if sh == nil {
 		s.mu.RUnlock()
+		// shard不存在不要紧，调用方会创建shard之后再次调用WriteToShard方法
 		return ErrShardNotFound
 	}
 	s.mu.RUnlock()

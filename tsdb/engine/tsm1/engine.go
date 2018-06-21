@@ -165,6 +165,7 @@ type Engine struct {
 
 	// CacheFlushMemorySizeThreshold specifies the minimum size threshold for
 	// the cache when the engine should write a snapshot to a TSM file
+	// 需要快照到TSM文件的最小缓存大小
 	CacheFlushMemorySizeThreshold uint64
 
 	// CacheFlushWriteColdDuration specifies the length of time after which if
@@ -350,10 +351,11 @@ func (e *Engine) SetEnabled(enabled bool) {
 
 // SetCompactionsEnabled enables compactions on the engine.  When disabled
 // all running compactions are aborted and new compactions stop running.
+// 启动压缩
 func (e *Engine) SetCompactionsEnabled(enabled bool) {
 	if enabled {
-		e.enableSnapshotCompactions()
-		e.enableLevelCompactions(false)
+		e.enableSnapshotCompactions()   // 启动快照压缩（从内存到tsm文件）
+		e.enableLevelCompactions(false) // 启动层级压缩（从level0文件到level1文件等）
 	} else {
 		e.disableSnapshotCompactions()
 		e.disableLevelCompactions(false)
@@ -393,7 +395,7 @@ func (e *Engine) enableLevelCompactions(wait bool) {
 	e.wg = wg
 	e.mu.Unlock()
 
-	go func() { defer wg.Done(); e.compact(wg) }()
+	go func() { defer wg.Done(); e.compact(wg) }() // 启动压缩
 }
 
 // disableLevelCompactions will stop level compactions before returning.
@@ -466,7 +468,7 @@ func (e *Engine) enableSnapshotCompactions() {
 	}
 
 	e.Compactor.EnableSnapshots()
-	e.snapDone = make(chan struct{})
+	e.snapDone = make(chan struct{}) // snapDone用来判断是否以打开了压缩
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	e.snapWG = wg
@@ -1240,12 +1242,13 @@ func (e *Engine) WritePoints(points []models.Point) error {
 	)
 
 	for _, p := range points {
+		// 复用keyBuf
 		keyBuf = append(keyBuf[:0], p.Key()...)
 		keyBuf = append(keyBuf, keyFieldSeparator...)
 		baseLen = len(keyBuf)
 		// 一条插入语句中一个 series 对应的多个 value 会被拆分出来，形成多条数据
 		iter := p.FieldIterator()
-		t := p.Time().UnixNano()
+		t := p.Time().UnixNano() // 把时间戳拿出来，因为每个field存储时都要
 		for iter.Next() {
 			// Skip fields name "time", they are illegal
 			if bytes.Equal(iter.FieldKey(), timeBytes) {
@@ -1286,7 +1289,7 @@ func (e *Engine) WritePoints(points []models.Point) error {
 			}
 
 			var v Value
-			switch iter.Type() {
+			switch iter.Type() { // 当前field的type
 			case models.Float:
 				fv, err := iter.FloatValue()
 				if err != nil {
@@ -1316,6 +1319,7 @@ func (e *Engine) WritePoints(points []models.Point) error {
 			default:
 				return fmt.Errorf("unknown field type for %s: %s", string(iter.FieldKey()), p.String())
 			}
+			// append, 最终的values里面存的是key对应的value的list
 			values[string(keyBuf)] = append(values[string(keyBuf)], v)
 		}
 	}
@@ -1759,9 +1763,11 @@ func (e *Engine) CreateSeriesIfNotExists(key, name []byte, tags models.Tags) err
 func (e *Engine) WriteTo(w io.Writer) (n int64, err error) { panic("not implemented") }
 
 // WriteSnapshot will snapshot the cache and write a new TSM file with its contents, releasing the snapshot when done.
+// 将缓存快照，写入新的TSM文件，完成之后释放快照
 func (e *Engine) WriteSnapshot() error {
 	// Lock and grab the cache snapshot along with all the closed WAL
 	// filenames associated with the snapshot
+	// 之后要删除这些WAL文件
 
 	started := time.Now()
 
@@ -1780,16 +1786,21 @@ func (e *Engine) WriteSnapshot() error {
 		defer e.mu.Unlock()
 
 		if e.WALEnabled {
+			// 关闭当前的WAL段文件，并且创建一个新的
 			if err = e.WAL.CloseSegment(); err != nil {
 				return
 			}
 
+			// 返回关闭了的WAL段文件
 			segments, err = e.WAL.ClosedSegments()
 			if err != nil {
 				return
 			}
 		}
 
+		// 获取当前 cache 的快照内容
+		// 这里要注意的是：我们先关闭了WAL文件，然后获取快照，那么获取的快照中可能会包含WAL中没有的数据，
+		// 这不要紧，其实就当是重复写入来处理，会忽略掉之后的记录。
 		snapshot, err = e.Cache.Snapshot()
 		if err != nil {
 			return
@@ -1811,6 +1822,7 @@ func (e *Engine) WriteSnapshot() error {
 	// it before writing the snapshot.  This can be very expensive so it's done while we are not
 	// holding the engine write lock.
 	dedup := time.Now()
+	// 去重及排序
 	snapshot.Deduplicate()
 	e.traceLogger.Info("Snapshot for path deduplicated",
 		zap.String("path", e.path),
@@ -1838,14 +1850,16 @@ func (e *Engine) CreateSnapshot() (string, error) {
 }
 
 // writeSnapshotAndCommit will write the passed cache to a new TSM file and remove the closed WAL segments.
+// 将传递的cache快照写入新的TSM文件，并且删除关闭了的WAL段文件。
 func (e *Engine) writeSnapshotAndCommit(log *zap.Logger, closedFiles []string, snapshot *Cache) (err error) {
 	defer func() {
 		if err != nil {
-			e.Cache.ClearSnapshot(false)
+			e.Cache.ClearSnapshot(false) // 清空快照
 		}
 	}()
 
 	// write the new snapshot files
+	// 将快照写入一个或多个TSM文件，返回文件名，以.tmp结尾
 	newFiles, err := e.Compactor.WriteSnapshot(snapshot)
 	if err != nil {
 		log.Info("Error writing snapshot from compactor", zap.Error(err))
@@ -1856,6 +1870,9 @@ func (e *Engine) writeSnapshotAndCommit(log *zap.Logger, closedFiles []string, s
 	defer e.mu.RUnlock()
 
 	// update the file store with these new files
+	// 创建 newFiles 中的文件，重命名，将之后的 .tmp 去掉
+	// 之后 oldFiles 中的文件移除，这部分文件已经被合并过了
+	// 这里 oldFiles 为 nil，不对之前的文件进行任何操作
 	if err := e.FileStore.Replace(nil, newFiles); err != nil {
 		log.Info("Error adding new TSM files from snapshot", zap.Error(err))
 		return err
@@ -1888,7 +1905,7 @@ func (e *Engine) compactCache() {
 			return
 
 		case <-t.C:
-			e.Cache.UpdateAge()
+			e.Cache.UpdateAge() // 更新缓存距离上次快照的时间
 			if e.ShouldCompactCache() {
 				start := time.Now()
 				e.traceLogger.Info("Compacting cache", zap.String("path", e.path))
@@ -1907,6 +1924,9 @@ func (e *Engine) compactCache() {
 
 // ShouldCompactCache returns true if the Cache is over its flush threshold
 // or if the passed in lastWriteTime is older than the write cold threshold.
+// 两种情况下返回true
+// 1. Cache大小超过了flush的界限
+// 2. 数据是冷数据，最后的写时间超过了写入冷时间的界限
 func (e *Engine) ShouldCompactCache() bool {
 	sz := e.Cache.Size()
 
@@ -1922,6 +1942,7 @@ func (e *Engine) ShouldCompactCache() bool {
 }
 
 func (e *Engine) compact(wg *sync.WaitGroup) {
+	// 每秒执行一次
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 

@@ -56,6 +56,7 @@ func (a Values) assertOrdered() {
 // Deduplicate returns a new slice with any values that have the same timestamp removed.
 // The Value that appears last in the slice is the one that is kept.  The returned
 // Values are sorted if necessary.
+// 先排序，再去重
 func (a Values) Deduplicate() Values {
 	if len(a) <= 1 {
 		return a
@@ -74,7 +75,7 @@ func (a Values) Deduplicate() Values {
 		return a
 	}
 
-	sort.Stable(a)
+	sort.Stable(a) // Values实现了sort需要的方法，Len，Swap等
 	var i int
 	for j := 1; j < len(a); j++ {
 		v := a[j]

@@ -684,6 +684,7 @@ func (c *DefaultPlanner) Release(groups []CompactionGroup) {
 
 // Compactor merges multiple TSM files into new files or
 // writes a Cache into 1 or more TSM files.
+// 合并多个TSM文件到一个新文件或将Cache写入一个或多个文件
 type Compactor struct {
 	Dir  string
 	Size int
@@ -809,6 +810,7 @@ func (c *Compactor) EnableCompactions() {
 }
 
 // WriteSnapshot writes a Cache snapshot to one or more new TSM files.
+// 将快照写入一个或多个TSM文件，返回文件名，以.tmp结尾
 func (c *Compactor) WriteSnapshot(cache *Cache) ([]string, error) {
 	c.mu.RLock()
 	enabled := c.snapshotsEnabled
@@ -837,6 +839,7 @@ func (c *Compactor) WriteSnapshot(cache *Cache) ([]string, error) {
 		throttle = false
 	}
 
+	// 将快照切开，提高并发
 	splits := cache.Split(concurrency)
 
 	type res struct {
@@ -845,9 +848,12 @@ func (c *Compactor) WriteSnapshot(cache *Cache) ([]string, error) {
 	}
 
 	resC := make(chan res, concurrency)
+	// 这里会生成concurrency个TSM文件，但是至少能保证本次同一个key的记录在一个TSM文件中
 	for i := 0; i < concurrency; i++ {
 		go func(sp *Cache) {
+			// 迭代快照中的key，value
 			iter := NewCacheKeyIterator(sp, tsdb.DefaultMaxPointsPerBlock, intC)
+			// 将迭代器中获取到的数据写入文件
 			files, err := c.writeNewFiles(c.FileStore.NextGeneration(), 0, nil, iter, throttle)
 			resC <- res{files: files, err: err}
 
@@ -1022,6 +1028,8 @@ func (c *Compactor) removeTmpFiles(files []string) error {
 
 // writeNewFiles writes from the iterator into new TSM files, rotating
 // to a new file once it has reached the max TSM file size.
+// 将迭代器中的内容依次写入一个新的 tsm file，如果达到单个文件的上限，就继续写入另外一个新的文件
+// 返回所有创建了的新的 tsm 文件，此时还是以 .tmp 结尾
 func (c *Compactor) writeNewFiles(generation, sequence int, src []string, iter KeyIterator, throttle bool) ([]string, error) {
 	// These are the new TSM files written
 	var files []string
@@ -1030,6 +1038,7 @@ func (c *Compactor) writeNewFiles(generation, sequence int, src []string, iter K
 		sequence++
 
 		// New TSM files are written to a temp file and renamed when fully completed.
+		// 先写入一个 .tmp 结尾的临时文件，之后等全部写入完成后再执行 rename
 		fileName := filepath.Join(c.Dir, c.formatFileName(generation, sequence)+"."+TSMFileExtension+"."+TmpTSMFileExtension)
 
 		// Write as much as possible to this file
@@ -1037,6 +1046,7 @@ func (c *Compactor) writeNewFiles(generation, sequence int, src []string, iter K
 
 		// We've hit the max file limit and there is more to write.  Create a new file
 		// and continue.
+		// 如果达到单个文件的最大值，写入下一个文件
 		if err == errMaxFileExceeded || err == ErrMaxBlocksExceeded {
 			files = append(files, fileName)
 			continue
@@ -1072,6 +1082,8 @@ func (c *Compactor) writeNewFiles(generation, sequence int, src []string, iter K
 	return files, nil
 }
 
+// 从迭代器中不断获取数据，写入指定的文件
+// 如果超过单个文件大小的上限，会返回一个错误
 func (c *Compactor) write(path string, iter KeyIterator, throttle bool) (err error) {
 	fd, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0666)
 	if err != nil {
@@ -1121,6 +1133,7 @@ func (c *Compactor) write(path string, iter KeyIterator, throttle bool) (err err
 		}
 	}()
 
+	// 从迭代器中不断获取数据，写入指定的文件
 	for iter.Next() {
 		c.mu.RLock()
 		enabled := c.snapshotsEnabled || c.compactionsEnabled
@@ -1132,12 +1145,16 @@ func (c *Compactor) write(path string, iter KeyIterator, throttle bool) (err err
 		// Each call to read returns the next sorted key (or the prior one if there are
 		// more values to write).  The size of values will be less than or equal to our
 		// chunk size (1000)
+		// 每次调用read返回排序好的key的下一个(或者上一个，如果上一个还有数据要写).
+		// 数据量会小于等于chunk size
+		// Read returns the key, time range, and raw data for the next block,
 		key, minTime, maxTime, block, err := iter.Read()
 		if err != nil {
 			return err
 		}
 
 		// Write the key and value
+		// 写入block，block是一个逻辑概念
 		if err := w.WriteBlock(key, minTime, maxTime, block); err == ErrMaxBlocksExceeded {
 			if err := w.WriteIndex(); err != nil {
 				return err
@@ -1164,6 +1181,7 @@ func (c *Compactor) write(path string, iter KeyIterator, throttle bool) (err err
 	}
 
 	// We're all done.  Close out the file.
+	// 写入索引部分
 	if err := w.WriteIndex(); err != nil {
 		return err
 	}
@@ -1519,6 +1537,8 @@ func (k *tsmKeyIterator) merge() {
 	}
 }
 
+// Read returns the key, time range, and raw data for the next block,
+// or any error that occurred.
 func (k *tsmKeyIterator) Read() ([]byte, int64, int64, []byte, error) {
 	// See if compactions were disabled while we were running.
 	select {

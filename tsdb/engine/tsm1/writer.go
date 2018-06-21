@@ -133,6 +133,7 @@ type TSMWriter interface {
 	// responsible for ensuring keys and blocks are sorted appropriately, and that the
 	// block and index information is correct for the block.  The minTime and maxTime
 	// timestamp values are used as the minimum and maximum values for the index entry.
+	// WriteBlock写入一个新的block
 	WriteBlock(key []byte, minTime, maxTime int64, block []byte) error
 
 	// WriteIndex finishes the TSM write streams and writes the index.
@@ -273,6 +274,7 @@ type directIndex struct {
 	indexEntries *indexEntries
 }
 
+// 增加一个key的block索引信息
 func (d *directIndex) Add(key []byte, blockType byte, minTime, maxTime int64, offset int64, size uint32) {
 	// Is this the first block being added?
 	if len(d.key) == 0 {
@@ -294,12 +296,14 @@ func (d *directIndex) Add(key []byte, blockType byte, minTime, maxTime int64, of
 		})
 
 		// size of the encoded index entry
+		// indexEntrySize: 28字节，也就是MinTime，MaxTime，Offset，Size
 		d.size += indexEntrySize
 		d.keyCount++
 		return
 	}
 
 	// See if were still adding to the same series key.
+	// key是经过排序的，这里应该是处理写数据时需要写多个block，而索引只能创建同一个
 	cmp := bytes.Compare(d.key, key)
 	if cmp == 0 {
 		// The last block is still this key
@@ -314,6 +318,7 @@ func (d *directIndex) Add(key []byte, blockType byte, minTime, maxTime int64, of
 		d.size += indexEntrySize
 
 	} else if cmp < 0 {
+		// 一个新的key
 		d.flush(d.w)
 		// We have a new key that is greater than the last one so we need to add
 		// a new index block section.
@@ -478,6 +483,7 @@ func (d *directIndex) flush(w io.Writer) (int64, error) {
 	N += int64(n)
 
 	// Append each index entry for all blocks for this key
+	// 上面写入的是关于这个index的meta信息，现在写入具体的index信息
 	var n64 int64
 	if n64, err = entries.WriteTo(w); err != nil {
 		return n64 + N, fmt.Errorf("write: writer entries error: %v", err)
@@ -578,8 +584,10 @@ func NewTSMWriterWithDiskBuffer(w io.Writer) (TSMWriter, error) {
 	return &tsmWriter{wrapped: w, w: bufio.NewWriterSize(w, 1024*1024), index: index}, nil
 }
 
+// 写入Header部分数据
 func (t *tsmWriter) writeHeader() error {
 	var buf [5]byte
+	// 写入MagicNumber和Version
 	binary.BigEndian.PutUint32(buf[0:4], MagicNumber)
 	buf[4] = Version
 
@@ -649,6 +657,7 @@ func (t *tsmWriter) Write(key []byte, values Values) error {
 // WriteBlock writes block for the given key and time range to the TSM file.  If the write
 // exceeds max entries for a given key, ErrMaxBlocksExceeded is returned.  This indicates
 // that the index is now full for this key and no future writes to this key will succeed.
+// 写入不能超过一个key的max entries
 func (t *tsmWriter) WriteBlock(key []byte, minTime, maxTime int64, block []byte) error {
 	if len(key) > maxKeyLength {
 		return ErrMaxKeyLengthExceeded
@@ -659,12 +668,14 @@ func (t *tsmWriter) WriteBlock(key []byte, minTime, maxTime int64, block []byte)
 		return nil
 	}
 
+	// block的第一位就是blockType
 	blockType, err := BlockType(block)
 	if err != nil {
 		return err
 	}
 
 	// Write header only after we have some data to write.
+	// 只有写入一个新文件时才写header，t.n是当前写入的数据量
 	if t.n == 0 {
 		if err := t.writeHeader(); err != nil {
 			return err
@@ -674,6 +685,7 @@ func (t *tsmWriter) WriteBlock(key []byte, minTime, maxTime int64, block []byte)
 	var checksum [crc32.Size]byte
 	binary.BigEndian.PutUint32(checksum[:], crc32.ChecksumIEEE(block))
 
+	// 写入校验和
 	_, err = t.w.Write(checksum[:])
 	if err != nil {
 		return err
@@ -686,6 +698,7 @@ func (t *tsmWriter) WriteBlock(key []byte, minTime, maxTime int64, block []byte)
 	n += len(checksum)
 
 	// Record this block in index
+	// n表示新写入文件的大小(CRC + len(DATA))
 	t.index.Add(key, blockType, minTime, maxTime, t.n, uint32(n))
 
 	// Increment file position pointer (checksum + block len)

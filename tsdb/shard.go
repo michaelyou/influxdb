@@ -525,6 +525,7 @@ func (s *Shard) WritePoints(points []models.Point) error {
 }
 
 // validateSeriesAndFields checks which series and fields are new and whose metadata should be saved and indexed.
+// 检查要写入的 Points 中是否有新的 series 和 field，如果有，需要更新元数据信息以及索引信息，并且返回需要创建的 field 信息
 func (s *Shard) validateSeriesAndFields(points []models.Point) ([]models.Point, []*FieldCreate, error) {
 	var (
 		fieldsToCreate []*FieldCreate
@@ -553,8 +554,8 @@ func (s *Shard) validateSeriesAndFields(points []models.Point) ([]models.Point, 
 			continue
 		}
 
-		keys[j] = p.Key()
-		names[j] = p.Name()
+		keys[j] = p.Key()   // Key returns the key (measurement joined with tags) of the point.
+		names[j] = p.Name() // Name return the measurement name for the point.
 		tagsSlice[j] = tags
 		points[j] = points[i]
 		j++
@@ -568,6 +569,7 @@ func (s *Shard) validateSeriesAndFields(points []models.Point) ([]models.Point, 
 
 	// Add new series. Check for partial writes.
 	var droppedKeys [][]byte
+	// 如果series不存在，批量创建
 	if err := engine.CreateSeriesListIfNotExists(keys, names, tagsSlice); err != nil {
 		switch err := err.(type) {
 		// TODO(jmw): why is this a *PartialWriteError when everything else is not a pointer?
